@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"sort"
+	"strings"
 	"time"
 )
 
@@ -30,15 +32,12 @@ query CloudflareExporterZoneMetrics($zoneIDs: [string!], $mintime: Time!, $maxti
           visits
         }
       }
-      firewallEventsAdaptiveGroups(
+      firewallEventsAdaptive(
         limit: $limit
         filter: { datetime_geq: $mintime, datetime_lt: $maxtime }
       ) {
-        count
-        dimensions {
-          action
-          source
-        }
+        action
+        source
       }
     }
   }
@@ -65,15 +64,12 @@ query CloudflareExporterMetrics($zoneIDs: [string!], $accountID: string!, $minti
           visits
         }
       }
-      firewallEventsAdaptiveGroups(
+      firewallEventsAdaptive(
         limit: $limit
         filter: { datetime_geq: $mintime, datetime_lt: $maxtime }
       ) {
-        count
-        dimensions {
-          action
-          source
-        }
+        action
+        source
       }
     }
     accounts(filter: { accountTag: $accountID }) {
@@ -193,13 +189,10 @@ type graphQLResponse struct {
 						Visits            float64 `json:"visits"`
 					} `json:"sum"`
 				} `json:"httpRequestsAdaptiveGroups"`
-				FirewallEventsAdaptiveGroups []struct {
-					Count      float64 `json:"count"`
-					Dimensions struct {
-						Action string `json:"action"`
-						Source string `json:"source"`
-					} `json:"dimensions"`
-				} `json:"firewallEventsAdaptiveGroups"`
+				FirewallEventsAdaptive []struct {
+					Action string `json:"action"`
+					Source string `json:"source"`
+				} `json:"firewallEventsAdaptive"`
 			} `json:"zones"`
 			Accounts []struct {
 				AccountTag                 string `json:"accountTag"`
@@ -291,11 +284,29 @@ func (c *Client) FetchMetrics(ctx context.Context, zoneTags []string, accountTag
 				Visits:      nonNegative(r.Sum.Visits),
 			})
 		}
-		for _, f := range z.FirewallEventsAdaptiveGroups {
+		firewallCounts := map[string]float64{}
+		for _, f := range z.FirewallEventsAdaptive {
+			action := safeLabel(f.Action, "unknown")
+			source := safeLabel(f.Source, "unknown")
+			key := action + "\x00" + source
+			firewallCounts[key] += 1
+		}
+		keys := make([]string, 0, len(firewallCounts))
+		for key := range firewallCounts {
+			keys = append(keys, key)
+		}
+		sort.Strings(keys)
+		for _, key := range keys {
+			parts := strings.SplitN(key, "\x00", 2)
+			action := parts[0]
+			source := "unknown"
+			if len(parts) > 1 {
+				source = parts[1]
+			}
 			m.FirewallSamples = append(m.FirewallSamples, FirewallSample{
-				Action: safeLabel(f.Dimensions.Action, "unknown"),
-				Source: safeLabel(f.Dimensions.Source, "unknown"),
-				Count:  nonNegative(f.Count),
+				Action: action,
+				Source: source,
+				Count:  nonNegative(firewallCounts[key]),
 			})
 		}
 		out.Zones = append(out.Zones, m)

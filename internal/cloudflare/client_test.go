@@ -59,15 +59,20 @@ func TestFetchMetricsSuccess(t *testing.T) {
 		              }
 		            }
 		          ],
-		          "firewallEventsAdaptiveGroups": [
-		            {
-		              "count": 3,
-		              "dimensions": {
-		                "action": "block",
-		                "source": "waf"
-		              }
-		            }
-		          ]
+			          "firewallEventsAdaptive": [
+			            {
+			              "action": "block",
+			              "source": "waf"
+			            },
+			            {
+			              "action": "block",
+			              "source": "waf"
+			            },
+			            {
+			              "action": "block",
+			              "source": "waf"
+			            }
+			          ]
 		        }
 		      ],
 		      "accounts": [
@@ -186,7 +191,7 @@ func TestFetchMetricsWithoutAccountTagsUsesZoneOnlyQuery(t *testing.T) {
 						{
 							"zoneTag": "zone-1",
 							"httpRequestsAdaptiveGroups": [],
-							"firewallEventsAdaptiveGroups": []
+								"firewallEventsAdaptive": []
 						}
 					]
 				}
