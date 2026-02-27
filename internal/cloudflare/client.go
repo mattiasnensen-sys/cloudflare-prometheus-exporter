@@ -46,7 +46,7 @@ query CloudflareExporterZoneMetrics($zoneIDs: [string!], $mintime: Time!, $maxti
 `
 
 const zoneAndWorkerMetricsQuery = `
-query CloudflareExporterMetrics($zoneIDs: [string!], $accountIDs: [string!], $mintime: Time!, $maxtime: Time!, $limit: uint64!) {
+query CloudflareExporterMetrics($zoneIDs: [string!], $accountID: string!, $mintime: Time!, $maxtime: Time!, $limit: uint64!) {
   viewer {
     zones(filter: { zoneTag_in: $zoneIDs }) {
       zoneTag
@@ -76,7 +76,7 @@ query CloudflareExporterMetrics($zoneIDs: [string!], $accountIDs: [string!], $mi
         }
       }
     }
-    accounts(filter: { accountTag_in: $accountIDs }) {
+    accounts(filter: { accountTag: $accountID }) {
       accountTag
       workersInvocationsAdaptive(
         limit: $limit
@@ -234,7 +234,7 @@ func (c *Client) FetchMetrics(ctx context.Context, zoneTags []string, accountTag
 	}
 	query := zoneMetricsQuery
 	if len(accountTags) > 0 {
-		vars["accountIDs"] = accountTags
+		vars["accountID"] = accountTags[0]
 		query = zoneAndWorkerMetricsQuery
 	}
 

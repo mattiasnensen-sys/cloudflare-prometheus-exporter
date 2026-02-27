@@ -27,14 +27,14 @@ func TestFetchMetricsSuccess(t *testing.T) {
 		if !strings.Contains(query, "CloudflareExporterMetrics") {
 			t.Fatalf("expected query to contain CloudflareExporterMetrics")
 		}
-		if !strings.Contains(query, "accounts(filter: { accountTag_in: $accountIDs })") {
+		if !strings.Contains(query, "accounts(filter: { accountTag: $accountID })") {
 			t.Fatalf("expected workers query to include account filter")
 		}
 
 		variables, _ := payload["variables"].(map[string]any)
-		accountIDs, _ := variables["accountIDs"].([]any)
-		if len(accountIDs) != 1 || accountIDs[0] != "acc-1" {
-			t.Fatalf("expected accountIDs to include acc-1, got %+v", variables["accountIDs"])
+		accountID, _ := variables["accountID"].(string)
+		if accountID != "acc-1" {
+			t.Fatalf("expected accountID=acc-1, got %+v", variables["accountID"])
 		}
 
 		w.Header().Set("Content-Type", "application/json")
@@ -174,8 +174,8 @@ func TestFetchMetricsWithoutAccountTagsUsesZoneOnlyQuery(t *testing.T) {
 			t.Fatalf("zone-only query should not request workers metrics")
 		}
 		variables, _ := payload["variables"].(map[string]any)
-		if _, exists := variables["accountIDs"]; exists {
-			t.Fatalf("zone-only query should not set accountIDs variable")
+		if _, exists := variables["accountID"]; exists {
+			t.Fatalf("zone-only query should not set accountID variable")
 		}
 
 		w.Header().Set("Content-Type", "application/json")
