@@ -1,0 +1,9 @@
+1. Check exporter health:
+   kubectl -n {{ .Release.Namespace }} get pods -l app.kubernetes.io/instance={{ .Release.Name }}
+
+2. Port-forward and inspect metrics:
+   kubectl -n {{ .Release.Namespace }} port-forward svc/{{ include "cloudflare-exporter.fullname" . }} 9103:{{ .Values.service.port }}
+   curl -sS http://localhost:9103{{ .Values.metricsPath }} | head
+
+3. Ensure the credentials secret exists:
+   Secret: {{ include "cloudflare-exporter.secretName" . }}

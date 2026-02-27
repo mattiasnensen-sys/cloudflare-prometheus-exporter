@@ -1,0 +1,76 @@
+replicaCount: 1
+
+image:
+  repository: ghcr.io/mattiasnensen-sys/cloudflare-exporter
+  pullPolicy: IfNotPresent
+  tag: ""
+
+imagePullSecrets: []
+nameOverride: ""
+fullnameOverride: ""
+
+serviceAccount:
+  create: true
+  annotations: {}
+  name: ""
+
+podAnnotations: {}
+podLabels: {}
+
+podSecurityContext: {}
+securityContext:
+  runAsNonRoot: true
+  runAsUser: 65532
+  runAsGroup: 65532
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop:
+      - ALL
+
+service:
+  type: ClusterIP
+  port: 9103
+
+resources:
+  requests:
+    cpu: 50m
+    memory: 64Mi
+  limits:
+    cpu: 200m
+    memory: 256Mi
+
+nodeSelector: {}
+tolerations: []
+affinity: {}
+
+# Additional environment variables as name/value objects.
+extraEnv: []
+
+metricsPath: /metrics
+healthPath: /healthz
+
+cloudflare:
+  existingSecret:
+    name: cloudflare-exporter-credentials
+    apiTokenKey: api-token
+    zoneTagsKey: zone-tags
+  graphqlEndpoint: https://api.cloudflare.com/client/v4/graphql
+  pollInterval: 60s
+  windowDuration: 60s
+  scrapeDelay: 120s
+  requestTimeout: 20s
+  queryLimit: 10000
+
+secret:
+  create: false
+  name: ""
+  apiToken: ""
+  zoneTags: ""
+
+serviceMonitor:
+  enabled: false
+  interval: 60s
+  namespace: ""
+  labels: {}
+  annotations: {}

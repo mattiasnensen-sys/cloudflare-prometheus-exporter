@@ -16,8 +16,13 @@ type Metrics struct {
 	edgeBytesTotal       *prometheus.CounterVec
 	visitsTotal          *prometheus.CounterVec
 	firewallEventsTotal  *prometheus.CounterVec
+	workersInvocations   *prometheus.CounterVec
+	workersErrors        *prometheus.CounterVec
+	workersSubrequests   *prometheus.CounterVec
+	workersCPUTimeP50    *prometheus.GaugeVec
+	workersCPUTimeP99    *prometheus.GaugeVec
 	graphqlRequestsTotal *prometheus.CounterVec
-	graphqlLastSuccess   prometheus.Gauge
+	graphqlLastSuccess   *prometheus.GaugeVec
 	pollDuration         prometheus.Histogram
 
 	lastPollTime  time.Time
@@ -31,48 +36,84 @@ func NewMetrics() (*Metrics, *prometheus.Registry) {
 	m := &Metrics{
 		requestsTotal: prometheus.NewCounterVec(
 			prometheus.CounterOpts{
-				Name: "voximo_cloudflare_http_requests_total",
+				Name: "cloudflare.http.requests",
 				Help: "HTTP request counts from Cloudflare adaptive analytics.",
 			},
-			[]string{"zone", "hostname", "cache_status", "status_class"},
+			[]string{"zone.tag", "request.hostname", "cache.status", "http.status.class"},
 		),
 		edgeBytesTotal: prometheus.NewCounterVec(
 			prometheus.CounterOpts{
-				Name: "voximo_cloudflare_http_edge_bytes_total",
+				Name: "cloudflare.http.edge.response.bytes",
 				Help: "Edge response bytes from Cloudflare adaptive analytics.",
 			},
-			[]string{"zone", "hostname", "cache_status"},
+			[]string{"zone.tag", "request.hostname", "cache.status"},
 		),
 		visitsTotal: prometheus.NewCounterVec(
 			prometheus.CounterOpts{
-				Name: "voximo_cloudflare_http_visits_total",
+				Name: "cloudflare.http.visits",
 				Help: "Visit counts from Cloudflare adaptive analytics.",
 			},
-			[]string{"zone", "hostname"},
+			[]string{"zone.tag", "request.hostname"},
 		),
 		firewallEventsTotal: prometheus.NewCounterVec(
 			prometheus.CounterOpts{
-				Name: "voximo_cloudflare_firewall_events_total",
+				Name: "cloudflare.firewall.events",
 				Help: "Firewall event counts from Cloudflare adaptive analytics.",
 			},
-			[]string{"zone", "action", "source"},
+			[]string{"zone.tag", "firewall.action", "firewall.source"},
+		),
+		workersInvocations: prometheus.NewCounterVec(
+			prometheus.CounterOpts{
+				Name: "cloudflare.workers.invocations",
+				Help: "Worker invocation counts from Cloudflare workers analytics.",
+			},
+			[]string{"account.tag", "worker.script", "invocation.status"},
+		),
+		workersErrors: prometheus.NewCounterVec(
+			prometheus.CounterOpts{
+				Name: "cloudflare.workers.errors",
+				Help: "Worker error counts from Cloudflare workers analytics.",
+			},
+			[]string{"account.tag", "worker.script", "invocation.status"},
+		),
+		workersSubrequests: prometheus.NewCounterVec(
+			prometheus.CounterOpts{
+				Name: "cloudflare.workers.subrequests",
+				Help: "Worker subrequest counts from Cloudflare workers analytics.",
+			},
+			[]string{"account.tag", "worker.script", "invocation.status"},
+		),
+		workersCPUTimeP50: prometheus.NewGaugeVec(
+			prometheus.GaugeOpts{
+				Name: "cloudflare.workers.cpu.time.p50",
+				Help: "Worker CPU-time p50 from Cloudflare workers analytics.",
+			},
+			[]string{"account.tag", "worker.script", "invocation.status"},
+		),
+		workersCPUTimeP99: prometheus.NewGaugeVec(
+			prometheus.GaugeOpts{
+				Name: "cloudflare.workers.cpu.time.p99",
+				Help: "Worker CPU-time p99 from Cloudflare workers analytics.",
+			},
+			[]string{"account.tag", "worker.script", "invocation.status"},
 		),
 		graphqlRequestsTotal: prometheus.NewCounterVec(
 			prometheus.CounterOpts{
-				Name: "voximo_cloudflare_api_graphql_requests_total",
-				Help: "GraphQL polling attempts grouped by outcome.",
+				Name: "cloudflare.api.graphql.requests",
+				Help: "GraphQL polling attempts grouped by zone and outcome.",
 			},
-			[]string{"status"},
+			[]string{"zone.tag", "poll.status"},
 		),
-		graphqlLastSuccess: prometheus.NewGauge(
+		graphqlLastSuccess: prometheus.NewGaugeVec(
 			prometheus.GaugeOpts{
-				Name: "voximo_cloudflare_api_graphql_last_success_timestamp_seconds",
-				Help: "Unix timestamp of last successful GraphQL poll.",
+				Name: "cloudflare.api.graphql.last_success.timestamp",
+				Help: "Unix timestamp of last successful GraphQL poll by zone.",
 			},
+			[]string{"zone.tag"},
 		),
 		pollDuration: prometheus.NewHistogram(
 			prometheus.HistogramOpts{
-				Name:    "voximo_cloudflare_api_poll_duration_seconds",
+				Name:    "cloudflare.api.graphql.poll.duration",
 				Help:    "Duration of Cloudflare GraphQL poll calls.",
 				Buckets: prometheus.DefBuckets,
 			},
@@ -84,6 +125,11 @@ func NewMetrics() (*Metrics, *prometheus.Registry) {
 		m.edgeBytesTotal,
 		m.visitsTotal,
 		m.firewallEventsTotal,
+		m.workersInvocations,
+		m.workersErrors,
+		m.workersSubrequests,
+		m.workersCPUTimeP50,
+		m.workersCPUTimeP99,
 		m.graphqlRequestsTotal,
 		m.graphqlLastSuccess,
 		m.pollDuration,
@@ -93,9 +139,12 @@ func NewMetrics() (*Metrics, *prometheus.Registry) {
 }
 
 // ObserveSuccess records successful poll metrics.
-func (m *Metrics) ObserveSuccess(duration time.Duration) {
-	m.graphqlRequestsTotal.WithLabelValues("success").Inc()
-	m.graphqlLastSuccess.Set(float64(time.Now().Unix()))
+func (m *Metrics) ObserveSuccess(duration time.Duration, zoneTags []string) {
+	now := float64(time.Now().Unix())
+	for _, zoneTag := range zoneTags {
+		m.graphqlRequestsTotal.WithLabelValues(zoneTag, "success").Inc()
+		m.graphqlLastSuccess.WithLabelValues(zoneTag).Set(now)
+	}
 	m.pollDuration.Observe(duration.Seconds())
 
 	m.mu.Lock()
@@ -106,7 +155,7 @@ func (m *Metrics) ObserveSuccess(duration time.Duration) {
 
 // ObserveError records a failed poll.
 func (m *Metrics) ObserveError(duration time.Duration, err error) {
-	m.graphqlRequestsTotal.WithLabelValues("error").Inc()
+	m.graphqlRequestsTotal.WithLabelValues("all", "error").Inc()
 	m.pollDuration.Observe(duration.Seconds())
 
 	m.mu.Lock()
@@ -120,8 +169,8 @@ func (m *Metrics) ObserveError(duration time.Duration, err error) {
 }
 
 // Ingest adds one poll-window result into monotonically increasing counters.
-func (m *Metrics) Ingest(zoneResults []cloudflare.ZoneMetrics) {
-	for _, zone := range zoneResults {
+func (m *Metrics) Ingest(result cloudflare.MetricsSnapshot) {
+	for _, zone := range result.Zones {
 		zoneLabel := zone.ZoneTag
 		for _, sample := range zone.RequestSamples {
 			statusClass := toStatusClass(sample.EdgeStatus)
@@ -132,6 +181,15 @@ func (m *Metrics) Ingest(zoneResults []cloudflare.ZoneMetrics) {
 		for _, sample := range zone.FirewallSamples {
 			m.firewallEventsTotal.WithLabelValues(zoneLabel, sample.Action, sample.Source).Add(sample.Count)
 		}
+	}
+
+	for _, sample := range result.Workers {
+		labels := []string{sample.AccountTag, sample.ScriptName, sample.Status}
+		m.workersInvocations.WithLabelValues(labels...).Add(sample.Requests)
+		m.workersErrors.WithLabelValues(labels...).Add(sample.Errors)
+		m.workersSubrequests.WithLabelValues(labels...).Add(sample.Subrequests)
+		m.workersCPUTimeP50.WithLabelValues(labels...).Set(sample.CPUTimeP50)
+		m.workersCPUTimeP99.WithLabelValues(labels...).Set(sample.CPUTimeP99)
 	}
 }
 

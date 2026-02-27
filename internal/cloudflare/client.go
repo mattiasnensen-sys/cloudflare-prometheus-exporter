@@ -11,7 +11,7 @@ import (
 )
 
 const metricsQuery = `
-query VoximoMetrics($zoneIDs: [string!], $mintime: Time!, $maxtime: Time!, $limit: uint64!) {
+query CloudflareExporterMetrics($zoneIDs: [string!], $mintime: Time!, $maxtime: Time!, $limit: uint64!) {
   viewer {
     zones(filter: { zoneTag_in: $zoneIDs }) {
       zoneTag
@@ -38,6 +38,27 @@ query VoximoMetrics($zoneIDs: [string!], $mintime: Time!, $maxtime: Time!, $limi
         dimensions {
           action
           source
+        }
+      }
+    }
+    accounts {
+      accountTag
+      workersInvocationsAdaptive(
+        limit: $limit
+        filter: { datetime_geq: $mintime, datetime_lt: $maxtime }
+      ) {
+        dimensions {
+          scriptName
+          status
+        }
+        sum {
+          requests
+          errors
+          subrequests
+        }
+        quantiles {
+          cpuTimeP50
+          cpuTimeP99
         }
       }
     }
@@ -74,6 +95,24 @@ type ZoneMetrics struct {
 	ZoneTag         string
 	RequestSamples  []RequestSample
 	FirewallSamples []FirewallSample
+}
+
+// WorkerSample captures Workers runtime dimensions and aggregates.
+type WorkerSample struct {
+	AccountTag  string
+	ScriptName  string
+	Status      string
+	Requests    float64
+	Errors      float64
+	Subrequests float64
+	CPUTimeP50  float64
+	CPUTimeP99  float64
+}
+
+// MetricsSnapshot contains one poll-window result.
+type MetricsSnapshot struct {
+	Zones   []ZoneMetrics
+	Workers []WorkerSample
 }
 
 // RequestSample captures request-level dimensions.
@@ -127,13 +166,31 @@ type graphQLResponse struct {
 					} `json:"dimensions"`
 				} `json:"firewallEventsAdaptiveGroups"`
 			} `json:"zones"`
+			Accounts []struct {
+				AccountTag                 string `json:"accountTag"`
+				WorkersInvocationsAdaptive []struct {
+					Dimensions struct {
+						ScriptName string `json:"scriptName"`
+						Status     string `json:"status"`
+					} `json:"dimensions"`
+					Sum struct {
+						Requests    float64 `json:"requests"`
+						Errors      float64 `json:"errors"`
+						Subrequests float64 `json:"subrequests"`
+					} `json:"sum"`
+					Quantiles struct {
+						CPUTimeP50 float64 `json:"cpuTimeP50"`
+						CPUTimeP99 float64 `json:"cpuTimeP99"`
+					} `json:"quantiles"`
+				} `json:"workersInvocationsAdaptive"`
+			} `json:"accounts"`
 		} `json:"viewer"`
 	} `json:"data"`
 	Errors []graphQLError `json:"errors"`
 }
 
 // FetchMetrics fetches one analytics window for the provided zones.
-func (c *Client) FetchMetrics(ctx context.Context, zoneTags []string, window RequestWindow) ([]ZoneMetrics, error) {
+func (c *Client) FetchMetrics(ctx context.Context, zoneTags []string, window RequestWindow) (MetricsSnapshot, error) {
 	vars := map[string]interface{}{
 		"zoneIDs": zoneTags,
 		"mintime": window.MinTime.UTC().Format(time.RFC3339),
@@ -143,41 +200,45 @@ func (c *Client) FetchMetrics(ctx context.Context, zoneTags []string, window Req
 
 	payload, err := json.Marshal(graphQLRequest{Query: metricsQuery, Variables: vars})
 	if err != nil {
-		return nil, fmt.Errorf("marshal graphql request: %w", err)
+		return MetricsSnapshot{}, fmt.Errorf("marshal graphql request: %w", err)
 	}
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.endpoint, bytes.NewReader(payload))
 	if err != nil {
-		return nil, fmt.Errorf("build graphql request: %w", err)
+		return MetricsSnapshot{}, fmt.Errorf("build graphql request: %w", err)
 	}
 	req.Header.Set("Authorization", "Bearer "+c.apiToken)
 	req.Header.Set("Content-Type", "application/json")
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("execute graphql request: %w", err)
+		return MetricsSnapshot{}, fmt.Errorf("execute graphql request: %w", err)
 	}
 	defer resp.Body.Close()
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return nil, fmt.Errorf("read graphql response: %w", err)
+		return MetricsSnapshot{}, fmt.Errorf("read graphql response: %w", err)
 	}
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("graphql status %d: %s", resp.StatusCode, string(body))
+		return MetricsSnapshot{}, fmt.Errorf("graphql status %d: %s", resp.StatusCode, string(body))
 	}
 
 	var gqlResp graphQLResponse
 	if err := json.Unmarshal(body, &gqlResp); err != nil {
-		return nil, fmt.Errorf("decode graphql response: %w", err)
+		return MetricsSnapshot{}, fmt.Errorf("decode graphql response: %w", err)
 	}
 
 	if len(gqlResp.Errors) > 0 {
-		return nil, fmt.Errorf("graphql error: %s", gqlResp.Errors[0].Message)
+		return MetricsSnapshot{}, fmt.Errorf("graphql error: %s", gqlResp.Errors[0].Message)
 	}
 
-	out := make([]ZoneMetrics, 0, len(gqlResp.Data.Viewer.Zones))
+	out := MetricsSnapshot{
+		Zones:   make([]ZoneMetrics, 0, len(gqlResp.Data.Viewer.Zones)),
+		Workers: make([]WorkerSample, 0),
+	}
+
 	for _, z := range gqlResp.Data.Viewer.Zones {
 		m := ZoneMetrics{ZoneTag: z.ZoneTag}
 		for _, r := range z.HTTPRequestsAdaptiveGroups {
@@ -197,7 +258,23 @@ func (c *Client) FetchMetrics(ctx context.Context, zoneTags []string, window Req
 				Count:  nonNegative(f.Count),
 			})
 		}
-		out = append(out, m)
+		out.Zones = append(out.Zones, m)
+	}
+
+	for _, account := range gqlResp.Data.Viewer.Accounts {
+		accountTag := safeLabel(account.AccountTag, "unknown")
+		for _, w := range account.WorkersInvocationsAdaptive {
+			out.Workers = append(out.Workers, WorkerSample{
+				AccountTag:  accountTag,
+				ScriptName:  safeLabel(w.Dimensions.ScriptName, "unknown"),
+				Status:      safeLabel(w.Dimensions.Status, "unknown"),
+				Requests:    nonNegative(w.Sum.Requests),
+				Errors:      nonNegative(w.Sum.Errors),
+				Subrequests: nonNegative(w.Sum.Subrequests),
+				CPUTimeP50:  nonNegative(w.Quantiles.CPUTimeP50),
+				CPUTimeP99:  nonNegative(w.Quantiles.CPUTimeP99),
+			})
+		}
 	}
 
 	return out, nil

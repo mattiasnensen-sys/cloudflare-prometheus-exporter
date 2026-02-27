@@ -24,8 +24,8 @@ func TestFetchMetricsSuccess(t *testing.T) {
 		}
 
 		query, _ := payload["query"].(string)
-		if !strings.Contains(query, "VoximoMetrics") {
-			t.Fatalf("expected query to contain VoximoMetrics")
+		if !strings.Contains(query, "CloudflareExporterMetrics") {
+			t.Fatalf("expected query to contain CloudflareExporterMetrics")
 		}
 
 		w.Header().Set("Content-Type", "application/json")
@@ -40,7 +40,7 @@ func TestFetchMetricsSuccess(t *testing.T) {
 		            {
 		              "count": 42,
 		              "dimensions": {
-		                "clientRequestHTTPHost": "www.voximo.eu",
+		                "clientRequestHTTPHost": "www.example.com",
 		                "cacheStatus": "hit",
 		                "edgeResponseStatus": 200
 		              },
@@ -60,6 +60,28 @@ func TestFetchMetricsSuccess(t *testing.T) {
 		            }
 		          ]
 		        }
+		      ],
+		      "accounts": [
+		        {
+		          "accountTag": "acc-1",
+		          "workersInvocationsAdaptive": [
+		            {
+		              "dimensions": {
+		                "scriptName": "voximo-media-gateway",
+		                "status": "ok"
+		              },
+		              "sum": {
+		                "requests": 100,
+		                "errors": 2,
+		                "subrequests": 50
+		              },
+		              "quantiles": {
+		                "cpuTimeP50": 3,
+		                "cpuTimeP99": 12
+		              }
+		            }
+		          ]
+		        }
 		      ]
 		    }
 		  }
@@ -75,11 +97,11 @@ func TestFetchMetricsSuccess(t *testing.T) {
 	if err != nil {
 		t.Fatalf("FetchMetrics returned error: %v", err)
 	}
-	if len(res) != 1 {
-		t.Fatalf("expected 1 zone result, got %d", len(res))
+	if len(res.Zones) != 1 {
+		t.Fatalf("expected 1 zone result, got %d", len(res.Zones))
 	}
 
-	zone := res[0]
+	zone := res.Zones[0]
 	if zone.ZoneTag != "zone-1" {
 		t.Fatalf("unexpected zone tag: %s", zone.ZoneTag)
 	}
@@ -91,7 +113,7 @@ func TestFetchMetricsSuccess(t *testing.T) {
 	}
 
 	req := zone.RequestSamples[0]
-	if req.Hostname != "www.voximo.eu" || req.CacheStatus != "hit" || req.EdgeStatus != 200 {
+	if req.Hostname != "www.example.com" || req.CacheStatus != "hit" || req.EdgeStatus != 200 {
 		t.Fatalf("unexpected request sample: %+v", req)
 	}
 	if req.Count != 42 || req.EdgeBytes != 12345 || req.Visits != 10 {
@@ -101,6 +123,17 @@ func TestFetchMetricsSuccess(t *testing.T) {
 	fw := zone.FirewallSamples[0]
 	if fw.Action != "block" || fw.Source != "waf" || fw.Count != 3 {
 		t.Fatalf("unexpected firewall sample: %+v", fw)
+	}
+
+	if len(res.Workers) != 1 {
+		t.Fatalf("expected 1 worker sample, got %d", len(res.Workers))
+	}
+	worker := res.Workers[0]
+	if worker.AccountTag != "acc-1" || worker.ScriptName != "voximo-media-gateway" || worker.Status != "ok" {
+		t.Fatalf("unexpected worker dimensions: %+v", worker)
+	}
+	if worker.Requests != 100 || worker.Errors != 2 || worker.Subrequests != 50 || worker.CPUTimeP50 != 3 || worker.CPUTimeP99 != 12 {
+		t.Fatalf("unexpected worker values: %+v", worker)
 	}
 }
 

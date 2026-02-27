@@ -115,9 +115,17 @@ func runPoller(ctx context.Context, cfClient *cloudflare.Client, metrics *export
 			return
 		}
 
+		zoneTags := make([]string, 0, len(result.Zones))
+		for _, zone := range result.Zones {
+			zoneTags = append(zoneTags, zone.ZoneTag)
+		}
+		if len(zoneTags) == 0 {
+			zoneTags = append(zoneTags, cfg.CloudflareZoneTags...)
+		}
+
 		metrics.Ingest(result)
-		metrics.ObserveSuccess(duration)
-		slog.Info("poll completed", "zones", len(result), "duration", duration.String(), "window_start", windowStart, "window_end", windowEnd)
+		metrics.ObserveSuccess(duration, zoneTags)
+		slog.Info("poll completed", "zones", len(result.Zones), "workers_samples", len(result.Workers), "duration", duration.String(), "window_start", windowStart, "window_end", windowEnd)
 	}
 
 	poll()

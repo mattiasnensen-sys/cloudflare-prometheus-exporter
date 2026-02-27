@@ -1,0 +1,100 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "cloudflare-exporter.fullname" . }}
+  labels:
+    {{- include "cloudflare-exporter.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "cloudflare-exporter.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "cloudflare-exporter.selectorLabels" . | nindent 8 }}
+        {{- with .Values.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      {{- with .Values.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+    spec:
+      serviceAccountName: {{ include "cloudflare-exporter.serviceAccountName" . }}
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      containers:
+        - name: cloudflare-exporter
+          image: "{{ .Values.image.repository }}:{{ default .Chart.AppVersion .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.service.port }}
+              protocol: TCP
+          env:
+            - name: CLOUDFLARE_API_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "cloudflare-exporter.secretName" . }}
+                  key: {{ .Values.cloudflare.existingSecret.apiTokenKey }}
+            - name: CLOUDFLARE_ZONE_TAGS
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "cloudflare-exporter.secretName" . }}
+                  key: {{ .Values.cloudflare.existingSecret.zoneTagsKey }}
+            - name: CLOUDFLARE_GRAPHQL_ENDPOINT
+              value: {{ .Values.cloudflare.graphqlEndpoint | quote }}
+            - name: POLL_INTERVAL
+              value: {{ .Values.cloudflare.pollInterval | quote }}
+            - name: WINDOW_DURATION
+              value: {{ .Values.cloudflare.windowDuration | quote }}
+            - name: SCRAPE_DELAY
+              value: {{ .Values.cloudflare.scrapeDelay | quote }}
+            - name: REQUEST_TIMEOUT
+              value: {{ .Values.cloudflare.requestTimeout | quote }}
+            - name: QUERY_LIMIT
+              value: {{ .Values.cloudflare.queryLimit | quote }}
+            - name: PORT
+              value: {{ .Values.service.port | quote }}
+            - name: METRICS_PATH
+              value: {{ .Values.metricsPath | quote }}
+            - name: HEALTH_PATH
+              value: {{ .Values.healthPath | quote }}
+            {{- with .Values.extraEnv }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          readinessProbe:
+            httpGet:
+              path: {{ .Values.healthPath }}
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 20
+            timeoutSeconds: 3
+          livenessProbe:
+            httpGet:
+              path: {{ .Values.healthPath }}
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 30
+            timeoutSeconds: 3
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}

@@ -12,13 +12,18 @@ This project polls Cloudflare GraphQL Analytics API and exposes low-cardinality 
 
 ## Exported Metrics
 
-- `voximo_cloudflare_http_requests_total{zone,hostname,cache_status,status_class}`
-- `voximo_cloudflare_http_edge_bytes_total{zone,hostname,cache_status}`
-- `voximo_cloudflare_http_visits_total{zone,hostname}`
-- `voximo_cloudflare_firewall_events_total{zone,action,source}`
-- `voximo_cloudflare_api_graphql_requests_total{status}`
-- `voximo_cloudflare_api_graphql_last_success_timestamp_seconds`
-- `voximo_cloudflare_api_poll_duration_seconds`
+- `cloudflare.http.requests{zone.tag,request.hostname,cache.status,http.status.class}`
+- `cloudflare.http.edge.response.bytes{zone.tag,request.hostname,cache.status}`
+- `cloudflare.http.visits{zone.tag,request.hostname}`
+- `cloudflare.firewall.events{zone.tag,firewall.action,firewall.source}`
+- `cloudflare.workers.invocations{account.tag,worker.script,invocation.status}`
+- `cloudflare.workers.errors{account.tag,worker.script,invocation.status}`
+- `cloudflare.workers.subrequests{account.tag,worker.script,invocation.status}`
+- `cloudflare.workers.cpu.time.p50{account.tag,worker.script,invocation.status}`
+- `cloudflare.workers.cpu.time.p99{account.tag,worker.script,invocation.status}`
+- `cloudflare.api.graphql.requests{zone.tag,poll.status}`
+- `cloudflare.api.graphql.last_success.timestamp{zone.tag}`
+- `cloudflare.api.graphql.poll.duration`
 
 ## Configuration
 
@@ -42,9 +47,6 @@ Minimum expected permissions:
 
 - Zone -> Analytics: Read
 - Zone -> Zone: Read
-
-If your tenant/API route requires account-level analytics access, also add:
-
 - Account -> Account Analytics: Read
 
 ## Local Run
@@ -59,6 +61,30 @@ Then open:
 
 - `http://localhost:9103/metrics`
 - `http://localhost:9103/healthz`
+
+## Helm Chart
+
+A deployable chart is included in this repository:
+
+- `charts/cloudflare-exporter`
+
+Install example:
+
+```bash
+helm upgrade --install cloudflare-exporter ./charts/cloudflare-exporter \
+  --namespace otel --create-namespace \
+  --set cloudflare.existingSecret.name=cloudflare-exporter-credentials
+```
+
+If you want Helm to create the credentials secret directly:
+
+```bash
+helm upgrade --install cloudflare-exporter ./charts/cloudflare-exporter \
+  --namespace otel --create-namespace \
+  --set secret.create=true \
+  --set secret.apiToken="<token>" \
+  --set secret.zoneTags="<zone-id-1>,<zone-id-2>"
+```
 
 ## Prometheus Scrape Example
 
@@ -83,7 +109,7 @@ receivers:
             - targets: ["cloudflare-exporter:9103"]
           metric_relabel_configs:
             - source_labels: [__name__]
-              regex: "voximo_cloudflare_.*"
+              regex: "cloudflare\\..*"
               action: keep
 ```
 
@@ -92,3 +118,24 @@ receivers:
 - This exporter adds each poll window to monotonic counters.
 - Counters reset on process restart, which is normal Prometheus behavior.
 - Keep hostname cardinality bounded at Cloudflare side (host filtering) if needed.
+
+## CI/CD
+
+GitHub Actions workflows included:
+
+- `.github/workflows/ci.yaml`:
+  - `go mod tidy` + `gofmt` check (via `make tidy` + `make fmt`)
+  - `git diff --exit-code` guard for generated/format changes
+  - `go vet`
+  - `go test -race -covermode=atomic -coverprofile=coverage.out ./...`
+  - upload coverage artifact
+  - Docker build smoke test
+  - `helm lint` + `helm template`
+- `.github/workflows/image.yaml`:
+  - publish snapshot image to `ghcr.io/<owner>/cloudflare-exporter` on `main`
+- `.github/workflows/release-image.yaml`:
+  - verify release inputs and publish semver-tagged multi-arch image on `v*.*.*`
+- `.github/workflows/helm-publish.yaml`:
+  - auto-update `charts/cloudflare-exporter/Chart.yaml` `version` + `appVersion` from `chart-v*.*.*` tag
+  - commit updated `Chart.yaml` to `main`
+  - package and push chart to OCI registry `ghcr.io/<owner>/charts/cloudflare-exporter`
