@@ -55,6 +55,7 @@ cloudflare:
     name: cloudflare-exporter-credentials
     apiTokenKey: api-token
     zoneTagsKey: zone-tags
+  accountTags: ""
   graphqlEndpoint: https://api.cloudflare.com/client/v4/graphql
   pollInterval: 60s
   windowDuration: 60s

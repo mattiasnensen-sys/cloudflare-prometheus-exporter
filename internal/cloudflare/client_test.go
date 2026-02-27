@@ -27,6 +27,15 @@ func TestFetchMetricsSuccess(t *testing.T) {
 		if !strings.Contains(query, "CloudflareExporterMetrics") {
 			t.Fatalf("expected query to contain CloudflareExporterMetrics")
 		}
+		if !strings.Contains(query, "accounts(filter: { accountTag_in: $accountIDs })") {
+			t.Fatalf("expected workers query to include account filter")
+		}
+
+		variables, _ := payload["variables"].(map[string]any)
+		accountIDs, _ := variables["accountIDs"].([]any)
+		if len(accountIDs) != 1 || accountIDs[0] != "acc-1" {
+			t.Fatalf("expected accountIDs to include acc-1, got %+v", variables["accountIDs"])
+		}
 
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`
@@ -90,7 +99,7 @@ func TestFetchMetricsSuccess(t *testing.T) {
 	defer ts.Close()
 
 	client := NewClient(ts.URL, "token-123", 10000, 2*time.Second)
-	res, err := client.FetchMetrics(context.Background(), []string{"zone-1"}, RequestWindow{
+	res, err := client.FetchMetrics(context.Background(), []string{"zone-1"}, []string{"acc-1"}, RequestWindow{
 		MinTime: time.Now().Add(-2 * time.Minute),
 		MaxTime: time.Now().Add(-1 * time.Minute),
 	})
@@ -145,11 +154,56 @@ func TestFetchMetricsGraphQLError(t *testing.T) {
 	defer ts.Close()
 
 	client := NewClient(ts.URL, "token", 10000, 2*time.Second)
-	_, err := client.FetchMetrics(context.Background(), []string{"zone-1"}, RequestWindow{
+	_, err := client.FetchMetrics(context.Background(), []string{"zone-1"}, []string{"acc-1"}, RequestWindow{
 		MinTime: time.Now().Add(-2 * time.Minute),
 		MaxTime: time.Now().Add(-1 * time.Minute),
 	})
 	if err == nil || !strings.Contains(err.Error(), "graphql error") {
 		t.Fatalf("expected graphql error, got %v", err)
+	}
+}
+
+func TestFetchMetricsWithoutAccountTagsUsesZoneOnlyQuery(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var payload map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			t.Fatalf("decode payload: %v", err)
+		}
+		query, _ := payload["query"].(string)
+		if strings.Contains(query, "workersInvocationsAdaptive") {
+			t.Fatalf("zone-only query should not request workers metrics")
+		}
+		variables, _ := payload["variables"].(map[string]any)
+		if _, exists := variables["accountIDs"]; exists {
+			t.Fatalf("zone-only query should not set accountIDs variable")
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{
+			"data": {
+				"viewer": {
+					"zones": [
+						{
+							"zoneTag": "zone-1",
+							"httpRequestsAdaptiveGroups": [],
+							"firewallEventsAdaptiveGroups": []
+						}
+					]
+				}
+			}
+		}`))
+	}))
+	defer ts.Close()
+
+	client := NewClient(ts.URL, "token", 10000, 2*time.Second)
+	res, err := client.FetchMetrics(context.Background(), []string{"zone-1"}, nil, RequestWindow{
+		MinTime: time.Now().Add(-2 * time.Minute),
+		MaxTime: time.Now().Add(-1 * time.Minute),
+	})
+	if err != nil {
+		t.Fatalf("FetchMetrics returned error: %v", err)
+	}
+	if len(res.Workers) != 0 {
+		t.Fatalf("expected 0 worker samples, got %d", len(res.Workers))
 	}
 }

@@ -31,6 +31,8 @@ All configuration is provided via environment variables.
 
 - `CLOUDFLARE_API_TOKEN` (required): API token with analytics read scope
 - `CLOUDFLARE_ZONE_TAGS` (required): comma-separated zone IDs
+- `CLOUDFLARE_ACCOUNT_TAGS` (optional): comma-separated account IDs used for Workers analytics
+- `CLOUDFLARE_ACCOUNT_ID` (optional): single account ID fallback if `CLOUDFLARE_ACCOUNT_TAGS` is unset
 - `CLOUDFLARE_GRAPHQL_ENDPOINT` (optional): default `https://api.cloudflare.com/client/v4/graphql`
 - `POLL_INTERVAL` (optional): default `60s`
 - `WINDOW_DURATION` (optional): default `60s`
@@ -47,13 +49,14 @@ Minimum expected permissions:
 
 - Zone -> Analytics: Read
 - Zone -> Zone: Read
-- Account -> Account Analytics: Read
+- Account -> Account Analytics: Read (required if Workers metrics are enabled via account IDs)
 
 ## Local Run
 
 ```bash
 export CLOUDFLARE_API_TOKEN="<token>"
 export CLOUDFLARE_ZONE_TAGS="<zone-id-1>,<zone-id-2>"
+export CLOUDFLARE_ACCOUNT_ID="<account-id>"
 go run ./cmd/cloudflare-exporter
 ```
 

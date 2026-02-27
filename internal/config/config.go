@@ -10,17 +10,18 @@ import (
 
 // Config holds runtime configuration for the exporter.
 type Config struct {
-	CloudflareAPIToken string
-	CloudflareZoneTags []string
-	CloudflareGraphQL  string
-	PollInterval       time.Duration
-	WindowDuration     time.Duration
-	ScrapeDelay        time.Duration
-	RequestTimeout     time.Duration
-	QueryLimit         int
-	Port               int
-	MetricsPath        string
-	HealthPath         string
+	CloudflareAPIToken    string
+	CloudflareZoneTags    []string
+	CloudflareAccountTags []string
+	CloudflareGraphQL     string
+	PollInterval          time.Duration
+	WindowDuration        time.Duration
+	ScrapeDelay           time.Duration
+	RequestTimeout        time.Duration
+	QueryLimit            int
+	Port                  int
+	MetricsPath           string
+	HealthPath            string
 }
 
 // FromEnv loads configuration from environment variables.
@@ -51,6 +52,19 @@ func FromEnv() (Config, error) {
 	}
 	if len(cfg.CloudflareZoneTags) == 0 {
 		return Config{}, fmt.Errorf("CLOUDFLARE_ZONE_TAGS is required")
+	}
+
+	accountTags := strings.Split(getEnv("CLOUDFLARE_ACCOUNT_TAGS", ""), ",")
+	for _, tag := range accountTags {
+		t := strings.TrimSpace(tag)
+		if t != "" {
+			cfg.CloudflareAccountTags = append(cfg.CloudflareAccountTags, t)
+		}
+	}
+	if len(cfg.CloudflareAccountTags) == 0 {
+		if accountTag := strings.TrimSpace(getEnv("CLOUDFLARE_ACCOUNT_ID", "")); accountTag != "" {
+			cfg.CloudflareAccountTags = append(cfg.CloudflareAccountTags, accountTag)
+		}
 	}
 
 	if cfg.QueryLimit <= 0 {

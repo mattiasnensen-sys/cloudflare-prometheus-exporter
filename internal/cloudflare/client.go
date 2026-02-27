@@ -10,8 +10,8 @@ import (
 	"time"
 )
 
-const metricsQuery = `
-query CloudflareExporterMetrics($zoneIDs: [string!], $mintime: Time!, $maxtime: Time!, $limit: uint64!) {
+const zoneMetricsQuery = `
+query CloudflareExporterZoneMetrics($zoneIDs: [string!], $mintime: Time!, $maxtime: Time!, $limit: uint64!) {
   viewer {
     zones(filter: { zoneTag_in: $zoneIDs }) {
       zoneTag
@@ -41,7 +41,42 @@ query CloudflareExporterMetrics($zoneIDs: [string!], $mintime: Time!, $maxtime: 
         }
       }
     }
-    accounts {
+  }
+}
+`
+
+const zoneAndWorkerMetricsQuery = `
+query CloudflareExporterMetrics($zoneIDs: [string!], $accountIDs: [string!], $mintime: Time!, $maxtime: Time!, $limit: uint64!) {
+  viewer {
+    zones(filter: { zoneTag_in: $zoneIDs }) {
+      zoneTag
+      httpRequestsAdaptiveGroups(
+        limit: $limit
+        filter: { datetime_geq: $mintime, datetime_lt: $maxtime }
+      ) {
+        count
+        dimensions {
+          clientRequestHTTPHost
+          cacheStatus
+          edgeResponseStatus
+        }
+        sum {
+          edgeResponseBytes
+          visits
+        }
+      }
+      firewallEventsAdaptiveGroups(
+        limit: $limit
+        filter: { datetime_geq: $mintime, datetime_lt: $maxtime }
+      ) {
+        count
+        dimensions {
+          action
+          source
+        }
+      }
+    }
+    accounts(filter: { accountTag_in: $accountIDs }) {
       accountTag
       workersInvocationsAdaptive(
         limit: $limit
@@ -189,16 +224,21 @@ type graphQLResponse struct {
 	Errors []graphQLError `json:"errors"`
 }
 
-// FetchMetrics fetches one analytics window for the provided zones.
-func (c *Client) FetchMetrics(ctx context.Context, zoneTags []string, window RequestWindow) (MetricsSnapshot, error) {
+// FetchMetrics fetches one analytics window for the provided zones and accounts.
+func (c *Client) FetchMetrics(ctx context.Context, zoneTags []string, accountTags []string, window RequestWindow) (MetricsSnapshot, error) {
 	vars := map[string]interface{}{
 		"zoneIDs": zoneTags,
 		"mintime": window.MinTime.UTC().Format(time.RFC3339),
 		"maxtime": window.MaxTime.UTC().Format(time.RFC3339),
 		"limit":   c.queryLimit,
 	}
+	query := zoneMetricsQuery
+	if len(accountTags) > 0 {
+		vars["accountIDs"] = accountTags
+		query = zoneAndWorkerMetricsQuery
+	}
 
-	payload, err := json.Marshal(graphQLRequest{Query: metricsQuery, Variables: vars})
+	payload, err := json.Marshal(graphQLRequest{Query: query, Variables: vars})
 	if err != nil {
 		return MetricsSnapshot{}, fmt.Errorf("marshal graphql request: %w", err)
 	}

@@ -30,6 +30,7 @@ func main() {
 		"window_duration", cfg.WindowDuration.String(),
 		"scrape_delay", cfg.ScrapeDelay.String(),
 		"zone_count", len(cfg.CloudflareZoneTags),
+		"account_count", len(cfg.CloudflareAccountTags),
 		"graphql_endpoint", cfg.CloudflareGraphQL,
 	)
 
@@ -103,7 +104,7 @@ func runPoller(ctx context.Context, cfClient *cloudflare.Client, metrics *export
 		windowStart := windowEnd.Add(-cfg.WindowDuration)
 
 		start := time.Now()
-		result, err := cfClient.FetchMetrics(ctx, cfg.CloudflareZoneTags, cloudflare.RequestWindow{
+		result, err := cfClient.FetchMetrics(ctx, cfg.CloudflareZoneTags, cfg.CloudflareAccountTags, cloudflare.RequestWindow{
 			MinTime: windowStart,
 			MaxTime: windowEnd,
 		})

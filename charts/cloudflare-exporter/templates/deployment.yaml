@@ -49,6 +49,8 @@ spec:
                 secretKeyRef:
                   name: {{ include "cloudflare-exporter.secretName" . }}
                   key: {{ .Values.cloudflare.existingSecret.zoneTagsKey }}
+            - name: CLOUDFLARE_ACCOUNT_TAGS
+              value: {{ .Values.cloudflare.accountTags | quote }}
             - name: CLOUDFLARE_GRAPHQL_ENDPOINT
               value: {{ .Values.cloudflare.graphqlEndpoint | quote }}
             - name: POLL_INTERVAL
