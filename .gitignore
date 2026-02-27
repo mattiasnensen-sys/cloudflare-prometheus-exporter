@@ -1,0 +1,17 @@
+# Binaries
+bin/
+dist/
+*.exe
+*.test
+
+# Go coverage
+coverage.out
+*.coverprofile
+
+# IDE
+.vscode/
+.idea/
+.DS_Store
+
+# Env
+.env
